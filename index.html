@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Stroop 颜色词实验（CSV下载版）</title>
+<style>
+*{box-sizing:border-box;font-family:system-ui, sans-serif;}
+body{text-align:center;margin:40px auto;max-width:700px;font-size:18px;}
+.hidden{display:none !important;}
+#stimulus{font-size:72px;margin:40px 0;height:100px;line-height:100px;}
+.fixation{font-size:48px;color:#333;}
+button{font-size:20px;padding:12px 30px;margin:10px;border-radius:8px;border:1px solid #888;background:#f8f8f8;cursor:pointer;}
+button:hover{background:#eee;}
+#msg{font-size:18px;margin-top:20px;}
+input[type="text"]{font-size:18px;padding:8px;width:300px;}
+</style>
+</head>
+<body>
+
+<!-- 开始页 -->
+<div id="page-start">
+  <h2>Stroop 颜色词实验</h2>
+  <p>请输入被试姓名：</p >
+  <input type="text" id="subjName" placeholder="例如：张三">
+  <br><br>
+  <button onclick="goInstruction()">继续</button>
+</div>
+
+<!-- 指导语 -->
+<div id="page-instruction" class="hidden">
+  <h3>实验指导</h3>
+  <p>屏幕会出现一个中文颜色词。<br>
+  请判断：<strong>文字显示的颜色，是否和词语本身的意思一致</strong>。</p >
+  <p>如果一致，点【匹配】；不一致，点【不匹配】。<br>
+  请尽量又快又准作答。</p >
+  <p>一共 10 个试次。</p >
+  <button onclick="startTrial()">开始实验</button>
+</div>
+
+<!-- 实验刺激页 -->
+<div id="page-experiment" class="hidden">
+  <div id="stimulus"></div>
+  <div id="respBtns" class="hidden">
+    <button onclick="recordResponse(true)">匹配</button>
+    <button onclick="recordResponse(false)">不匹配</button>
+  </div>
+</div>
+
+<!-- 结束页：下载CSV -->
+<div id="page-done" class="hidden">
+  <h3>✅ 实验完成！</h3>
+  <p>请点下方按钮，下载数据文件，把文件发给主试。</p >
+  <button id="downloadBtn">下载我的数据（CSV）</button>
+  <div id="msg"></div>
+</div>
+
+<script>
+const trialPool = [
+  {word:"红", color:"red", match:true},
+  {word:"红", color:"yellow", match:false},
+  {word:"黄", color:"yellow", match:true},
+  {word:"黄", color:"blue", match:false},
+  {word:"蓝", color:"blue", match:true},
+  {word:"蓝", color:"red", match:false},
+  {word:"绿", color:"green", match:true},
+  {word:"绿", color:"blue", match:false},
+  {word:"紫", color:"purple", match:true},
+  {word:"紫", color:"red", match:false},
+];
+
+let state = {
+  subjName:"",
+  trials:[],
+  currentTrialIdx:0,
+  trialStartTs:null,
+  collectedRecords:[]
+};
+
+function shuffle(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+// 生成序列，保证相邻 word 不重复
+function getValidSequence(){
+  let seq;
+  let maxTry = 5000;
+  do{
+    seq = shuffle(trialPool);
+    maxTry--;
+    let ok = true;
+    for(let i=0; i<seq.length-1; i++){
+      if(seq[i].word === seq[i+1].word){
+        ok = false;
+        break;
+      }
+    }
+    if(ok) return seq;
+  }while(maxTry > 0);
+  return shuffle(trialPool);
+}
+
+function hideAll(){
+  document.querySelectorAll("div[id^='page-']").forEach(d=>d.classList.add("hidden"));
+}
+function show(id){
+  document.getElementById(id).classList.remove("hidden");
+}
+
+function goInstruction(){
+  const name = document.getElementById("subjName").value.trim();
+  if(!name){alert("请输入姓名");return;}
+  state.subjName = name;
+  hideAll();
+  show("page-instruction");
+}
+
+function startTrial(){
+  state.trials = getValidSequence();
+  state.currentTrialIdx = 0;
+  state.collectedRecords = [];
+  hideAll();
+  show("page-experiment");
+  runSingleTrial();
+}
+
+function runSingleTrial(){
+  const stimDiv = document.getElementById("stimulus");
+  const btnDiv = document.getElementById("respBtns");
+  btnDiv.classList.add("hidden");
+  stimDiv.innerHTML = '<span class="fixation">+</span>';
+  setTimeout(()=>{
+    const t = state.trials[state.currentTrialIdx];
+    stimDiv.innerHTML = `<span style="color:${t.color}">${t.word}</span>`;
+    state.trialStartTs = performance.now();
+    btnDiv.classList.remove("hidden");
+  },500);
+}
+
+function recordResponse(userSaidMatch){
+  const rtMs = Math.round(performance.now() - state.trialStartTs);
+  const t = state.trials[state.currentTrialIdx];
+  const correct = (userSaidMatch === t.match);
+
+  const record = {
+    subj: state.subjName,
+    trialNo: state.currentTrialIdx+1,
+    word: t.word,
+    color: t.color,
+    isMatch: t.match,
+    userRespMatch: userSaidMatch,
+    correct: correct,
+    rt: rtMs
+  };
+  state.collectedRecords.push(record);
+
+  state.currentTrialIdx++;
+  if(state.currentTrialIdx >= state.trials.length){
+    hideAll();
+    show("page-done");
+    bindDownload();
+  }else{
+    runSingleTrial();
+  }
+}
+
+// 导出CSV
+function bindDownload(){
+  const header = ["subj","trialNo","word","color","isMatch","userRespMatch","correct","rt"];
+  let csv = header.join(",") + "\n";
+  state.collectedRecords.forEach(r=>{
+    const row = [r.subj, r.trialNo, r.word, r.color, r.isMatch, r.userRespMatch, r.correct, r.rt];
+    csv += row.join(",") + "\n";
+  });
+  const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const btn = document.getElementById("downloadBtn");
+  btn.onclick = ()=>{
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `stroop_${state.subjName}.csv`;
+    a.click();
+  }
+}
+</script>
+</body>
+</html>
